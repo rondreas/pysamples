@@ -1,40 +1,48 @@
 """
 
-    Attempting to recreate the cc_chanmod_double.cpp from sdk samples.
+    This implements a ChannelModifier server with one input and one output.
 
-    Found useful hints in how to implement looking at 
-
-        extra/scripts/lxserv/stringEncode.py
-
-    Found this is already made in the official sdk also
-
-        https://modosdk.foundry.com/wiki/Channel_Modifier_Python_Wrapper
+    Modifier can be added in schematic and wired up to an input. The output will
+    be twice the input.
 
 """
 
 
 import lx
-from lxu import chanmod
+import lxu.meta
 
 
-class Operator(chanmod.Operator):
-    def initialize(self, desc):
+class Operator(lxu.meta.ChannelModifier):
+    """ The Operator is the core of the channel modifier. It both sets up the
+    channels for the modifier and serves as the object to hold onto value
+    interfaces.
+
+    """
+    def init_chan(self, desc):
+        """ init_chan() is called once to initialize the channels of the modifier.
+
+        We add the channels with required name and type. Channel modifier inputs
+        and outputs are associated with Value wrappers in the class itself.
+
+        The INPUT and OUTPUT flags tell the schematic which side to put the dot.
+
+        """
         desc.add('input', lx.symbol.sTYPE_FLOAT)
         desc.chmod_value(lx.symbol.fCHMOD_INPUT)
 
         desc.add('output', lx.symbol.sTYPE_FLOAT)
         desc.chmod_value(lx.symbol.fCHMOD_OUTPUT)
 
-    def eval(self, chans):
-        in_value = chans.input.GetFlt()
-        chans.output.SetFlt(in_value * 2.0)
+    def eval(self, chan):
+        """ eval() is called to perform operation. Inputs and outputs are bound
+        and can be read and written.
+
+        Read out input float and output twice its value to the result.
+
+        """
+        in_value = chan.input.GetFlt()
+        chan.output.SetFlt(in_value * 2.0)
 
 
-class Package(chanmod.MetaPackage):
-    def operator(self):
-        return Operator()
-
-
-# this will call lx.bless but with tags that are required
-# for channel modifiers.
-chanmod.bless_server(Package, "py.chanmod.double")
+chmod_meta = lxu.meta.Meta_ChannelModifier("py.chanmod.double", Operator)
+lxu.meta.MetaRoot(chmod_meta)
