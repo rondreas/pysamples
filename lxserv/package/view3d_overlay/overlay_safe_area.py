@@ -22,26 +22,59 @@ class Rectangle:
 
 
 class Instance(lxifc.PackageInstance, lxifc.ViewItem3D):
+    """ The instance is the implementation of the item, and there will be one
+    allocated for each item in the scene. It can respond to a set of
+    events."""
     def __init__(self):
         self.item = lx.object.Item()
+
+        self.camera_type = 0
+        self.renderer_type = 0
 
     def pins_Initialize(self, item, super):
         self.item = lx.object.Item(item)
 
+        # TODO: see why these are saved when they are already #defined somewhere...
+        scene_service = lx.service.Scene()
+        self.camera_type = scene_service.ItemTypeLookup(lx.symbol.sITYPE_CAMERA)
+        self.renderer_type = scene_service.ItemTypeLookup(lx.symbol.sITYPE_RENDER)
+
     def vitm_Draw(self, channel_read, stroke_draw, selection_flags, item_color):
-        # guess we do a check first to see if we're looking through a camera
+        # check to see if we're looking through a camera
         view = lx.object.View(stroke_draw)
         if view.Type() != lx.symbol.iVIEWv_CAMERA:
             return
 
-        # cr = lx.object.ChannelRead(channel_read)
+        cr = lx.object.ChannelRead(channel_read)
         sd = lx.object.StrokeDraw(stroke_draw)
-        if not sd.test():
+
+        # Test that the item we've attached this drawing override to is a camera type, or that it's parent is.
+        if self.item.TestType(self.camera_type):
+            camera = self.item
+        else:
+            camera = self.item.Parent()
+            if not camera.TestType(self.camera_type):
+                return
+
+        if not camera.test():
             return
 
-        sd.Begin(lx.symbol.iSTROKE_TEXT, (1.0, 1.0, 1.0), 1.0)
-        sd.Text("Hello", lx.symbol.iTEXT_LEFT)
-        sd.Vertex((0.0, 0.0, 0.0), lx.symbol.iSTROKE_ABSOLUTE)
+        # get the camera info object from camera, so we can get all channel values.
+        # ci = CameraInfo(camera)
+
+        action_on = cr.Integer(self.item, self.item.ChannelLookup("actionOn"))
+
+        # TODO: these values should all come from reading channels,
+        rgb = (0.8, 0.0, 0.8)
+        alpha = 1.0
+        line_width = 6.0
+
+        # sd.BeginWD(lx.symbol.iSTROKE_LINE_STRIP, rgb, alpha, line_width, lx.symbol.iLPAT_DASHLONG)
+
+        if action_on:
+            sd.Begin(lx.symbol.iSTROKE_TEXT, rgb, alpha)
+            sd.Text("Hello", lx.symbol.iTEXT_LEFT)
+            sd.Vertex((0.0, 0.0, 0.0), lx.symbol.iSTROKE_ABSOLUTE)
 
 
 class Package(lxifc.Package, lxifc.ChannelUI):
@@ -58,6 +91,8 @@ class Package(lxifc.Package, lxifc.ChannelUI):
         ac.SetDefault(0.0, 1)
 
     def pkg_Attach(self):
+        """ Attach is called to create a new instance of this item. The returned
+        object implements a specific item of this type in the scene."""
         return Instance()
 
     def pkg_TestInterface(self, guid: str):
