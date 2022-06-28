@@ -6,6 +6,7 @@
 """
 
 import channel_modifiers
+import command
 import mesh_operations
 import tool
 import package
