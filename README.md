@@ -23,7 +23,7 @@ Rewrite all samples from Modo's LXSDK in Python with detailed documentation abou
     - [x] arg
     - [ ] exec
     - [ ] filename
-    - [ ] mesh
+    - [x] mesh
     - [ ] modallayout
     - [ ] popup
     - [ ] rendercache
