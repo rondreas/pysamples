@@ -10,3 +10,4 @@ import command
 import mesh_operations
 import tool
 import package
+import item_type
