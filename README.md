@@ -36,7 +36,7 @@ Rewrite all samples from Modo's LXSDK in Python with detailed documentation abou
     - [ ] skin
 - [ ] drop
     - [ ] files
-    - [ ] items
+    - [x] items
 - [ ] file_io
     - [ ] image_basicload
     - [ ] image_basicsave
