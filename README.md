@@ -75,9 +75,9 @@ Rewrite all samples from Modo's LXSDK in Python with detailed documentation abou
     - [ ] colorSynthPath
 - [ ] scene_render
     - [ ] trace
-- [ ] schematic_connection
-    - [ ] graph
-    - [ ] modifier
+- [x] schematic_connection
+    - [x] graph
+    - [x] modifier
 - [ ] selection_type
     - [ ] int
 - [ ] tool
