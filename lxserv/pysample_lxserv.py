@@ -12,3 +12,4 @@ import tool
 import package
 import item_type
 import drop
+import schematic_connection
