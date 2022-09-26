@@ -4,6 +4,8 @@
 
     The tool already exists in Modo as prim.arc that we can compare against.
 
+    To run, `tool.set py.prim.arc on`
+
 """
 
 # FIXME: Currently this tool crashes Modo whenever activated.
@@ -81,7 +83,10 @@ class ToolAxis(ctypes.Structure):
         ("axIndex", ctypes.c_int),
         ("type", ctypes.c_int),
     ]
-    # TODO: add repr
+
+    def __repr__(self):
+        return f"ToolAxis(axis={self.axis}, up={self.up}, right={self.right}, m={self.m}, mInv={self.mInv},\
+         axIndex={self.axIndex}, type={self.type})"
 
 
 class ToolViewEvent(ctypes.Structure):
@@ -163,20 +168,27 @@ class ArcTool(lxifc.Tool, lxifc.ToolModel, lxu.attributes.DynamicAttributes):
         self.dyna_Add("center.x", lx.symbol.sTYPE_FLOAT)
         self.dyna_Add("center.y", lx.symbol.sTYPE_FLOAT)
         self.dyna_Add("center.z", lx.symbol.sTYPE_FLOAT)
+        self.center = (0.0, 0.0, 0.0)
 
         self.dyna_Add("start.x", lx.symbol.sTYPE_FLOAT)
         self.dyna_Add("start.y", lx.symbol.sTYPE_FLOAT)
         self.dyna_Add("start.z", lx.symbol.sTYPE_FLOAT)
+        self.start = (0.0, 0.0, 0.0)
 
         self.dyna_Add("end.x", lx.symbol.sTYPE_FLOAT)
         self.dyna_Add("end.y", lx.symbol.sTYPE_FLOAT)
         self.dyna_Add("end.z", lx.symbol.sTYPE_FLOAT)
+        self.end = (0.0, 0.0, 0.0)
 
         self.dyna_Add("radius", lx.symbol.sTYPE_DISTANCE)
+        self.radius = 0.0
         self.dyna_Add("angle", lx.symbol.sTYPE_ANGLE)
+        self.angle = 0.0
 
         self.dyna_Add("segments", lx.symbol.sTYPE_INTEGER)
+        self.segments = 1
         self.dyna_Add("reverse", lx.symbol.sTYPE_BOOLEAN)
+        self.reverse = 0
 
         selection_service = lx.service.Selection()
         self.scene_code = selection_service.LookupType(lx.symbol.sSELTYP_SCENE)
@@ -286,7 +298,8 @@ class ArcTool(lxifc.Tool, lxifc.ToolModel, lxu.attributes.DynamicAttributes):
         return self.vector_type
 
     def tool_Order(self):
-        return lx.symbol.s_ORD_ACTR  # "\xF0" is what the constant is defined as, which in ascii is ð or integer 240
+        return "\xF0"
+        #return lx.symbol.s_ORD_ACTR  # "\xF0" is what the constant is defined as, which in ascii is ð or integer 240
 
     def tool_Task(self):
         return lx.symbol.i_TASK_ACTR
@@ -331,7 +344,11 @@ class ArcTool(lxifc.Tool, lxifc.ToolModel, lxu.attributes.DynamicAttributes):
         tool_input_event = ToolInputEvent.from_address(vector_stack.Optional(self.offset_input))
 
         # TODO: Get the EventTranslatePacket from the vector stack
+        address = vector_stack.Optional(self.offset_event)
         event_translate_packet = lx.object.EventTranslatePacket()
+        print(f"Event Translate Packet test: {event_translate_packet.test()}")
+
+        event_translate_packet.set(address)  # NOTE: not working,
 
         # Test that the primary mesh is in the scene, (#56533)
         # guessing this is referring to a reported bug with the tool
@@ -372,9 +389,8 @@ class ArcTool(lxifc.Tool, lxifc.ToolModel, lxu.attributes.DynamicAttributes):
 
     def tool_Evaluate(self, vts):
         vector_stack = lx.object.VectorStack(vts)
-        tool_view_event = ToolViewEvent.from_address(self.offset_view)
+        tool_view_event = ToolViewEvent.from_address(vector_stack.Optional(self.offset_view))
 
-        # check that the pointer is not null, and also that the type is either 2D or 3D
         if (tool_view_event.type != lx.symbol.i_VIEWTYPE_3D) and (tool_view_event.type != lx.symbol.i_VIEWTYPE_2D):
             return
 
