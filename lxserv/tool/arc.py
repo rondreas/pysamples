@@ -8,8 +8,6 @@
 
 """
 
-# FIXME: Currently this tool crashes Modo whenever activated.
-
 from __future__ import annotations
 
 import math
@@ -105,6 +103,21 @@ class ToolViewEvent(ctypes.Structure):
          vportType={self.vportType}, viewProjection={self.viewProjection})"
 
 
+class ToolXfrm(ctypes.Structure):
+    _fields_ = [
+        ("v", ctypes.c_double*3),
+        ("m", (ctypes.c_double*3)*3),
+        ("mInv", (ctypes.c_double*3)*3),
+        ("flags", ctypes.c_int),
+        ("handedness", ctypes.c_int),
+        ("marks", ctypes.c_uint),
+    ]
+
+    def __repr__(self):
+        return f"ToolXfrm(v={self.v}, m={self.m}, mInt={self.mInv}, flags={self.flags}, handedness={self.handedness},\
+         marks={self.marks})"
+
+
 class ToolInputEvent(ctypes.Structure):
     _fields_ = [
         ("mode", ctypes.c_int),   # modifier key,
@@ -118,6 +131,18 @@ class ToolInputEvent(ctypes.Structure):
     def __repr__(self):
         return f"ToolInputEvent(mode={self.mode}, input={self.input}, count={self.count}, part={self.part},\
          type={self.type}, haul={self.haul})"
+
+
+def matrix_multiply(m: matrix, v: vector) -> vector:
+    """ recreating the matrix multiply from lxu math """
+    r = [0.0, 0.0, 0.0]
+    for i in range(3):
+        d = 0.0
+        for j in range(3):
+            d += v[j] * m[i][j]
+        r[i] = d
+
+    return tuple(r)
 
 
 def matrix_axis_rotation(a: vector, s: float, c: float) -> matrix:
@@ -299,7 +324,6 @@ class ArcTool(lxifc.Tool, lxifc.ToolModel, lxu.attributes.DynamicAttributes):
 
     def tool_Order(self):
         return "\xF0"
-        #return lx.symbol.s_ORD_ACTR  # "\xF0" is what the constant is defined as, which in ascii is ð or integer 240
 
     def tool_Task(self):
         return lx.symbol.i_TASK_ACTR
@@ -346,9 +370,7 @@ class ArcTool(lxifc.Tool, lxifc.ToolModel, lxu.attributes.DynamicAttributes):
         # TODO: Get the EventTranslatePacket from the vector stack
         address = vector_stack.Optional(self.offset_event)
         event_translate_packet = lx.object.EventTranslatePacket()
-        print(f"Event Translate Packet test: {event_translate_packet.test()}")
-
-        event_translate_packet.set(address)  # NOTE: not working,
+        # event_translate_packet.set(address)  # NOTE: not working,
 
         # Test that the primary mesh is in the scene, (#56533)
         # guessing this is referring to a reported bug with the tool
@@ -388,13 +410,14 @@ class ArcTool(lxifc.Tool, lxifc.ToolModel, lxu.attributes.DynamicAttributes):
         pass
 
     def tool_Evaluate(self, vts):
+        """ Tool evaluation gets the primary mesh and creates the arc shape on the mesh. """
         vector_stack = lx.object.VectorStack(vts)
         tool_view_event = ToolViewEvent.from_address(vector_stack.Optional(self.offset_view))
 
         if (tool_view_event.type != lx.symbol.i_VIEWTYPE_3D) and (tool_view_event.type != lx.symbol.i_VIEWTYPE_2D):
             return
 
-        tool_xfrm = vector_stack.Optional(self.offset_xfrm)
+        tool_xfrm = ToolXfrm.from_address(vector_stack.Optional(self.offset_xfrm))
 
         layer_service = lx.service.Layer()
         layer_scan = layer_service.ScanAllocate(
@@ -407,15 +430,42 @@ class ArcTool(lxifc.Tool, lxifc.ToolModel, lxu.attributes.DynamicAttributes):
         mesh = layer_scan.MeshEdit(0)
         vert = mesh.PointAccessor()
         poly = mesh.PolygonAccessor()
+        vmap = mesh.MeshMapAccessor()
 
+        # NOTE: redundant "safety check" ?
         num_segments = self.segments
         if num_segments < 1:
             num_segments = 1
 
         num_points = num_segments + 2
+        points = lx.object.storage('p', num_points)
+
+        tool_xfrm_vector = (tool_xfrm.v[0], tool_xfrm.v[1], tool_xfrm.v[2])
+        v = lxu.vector.sub(self.start, tool_xfrm_vector)
+        mInv = (
+            (tool_xfrm.mInv[0][0], tool_xfrm.mInv[0][1], tool_xfrm.mInv[0][2]),
+            (tool_xfrm.mInv[1][0], tool_xfrm.mInv[1][1], tool_xfrm.mInv[1][2]),
+            (tool_xfrm.mInv[2][0], tool_xfrm.mInv[2][1], tool_xfrm.mInv[2][2]),
+        )
+
+        pos = matrix_multiply(mInv, v)
+        points[0] = vert.New(pos)
 
         for index in range(num_segments):
             t = (index + 1) / num_segments
+            pos = self.get_pos(t, 1.0)
+            v = lxu.vector.sub(pos, tool_xfrm_vector)
+            pos = matrix_multiply(mInv, v)
+            points[index + 1] = vert.New(pos)
+
+        v = lxu.vector.sub(self.center, tool_xfrm_vector)
+        pos = matrix_multiply(mInv, v)
+        points[num_points-1] = vert.New(pos)
+
+        poly.New(lx.symbol.iPTYP_FACE, points, num_points, 0)
+
+        layer_scan.SetMeshChange(0, lx.symbol.f_MESHEDIT_GEOMETRY)
+        layer_scan.Apply()
 
     def get_pos(self, t: float, scale: float) -> Tuple[float, float, float]:
         """ Compute the arc position for the given fractional t. """
