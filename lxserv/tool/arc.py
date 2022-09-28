@@ -198,22 +198,24 @@ class ArcTool(lxifc.Tool, lxifc.ToolModel, lxu.attributes.DynamicAttributes):
         self.dyna_Add("start.x", lx.symbol.sTYPE_FLOAT)
         self.dyna_Add("start.y", lx.symbol.sTYPE_FLOAT)
         self.dyna_Add("start.z", lx.symbol.sTYPE_FLOAT)
-        self.start = (0.0, 0.0, 0.0)
+        self.start = (DEFAULT_RADIUS, 0.0, 0.0)
 
         self.dyna_Add("end.x", lx.symbol.sTYPE_FLOAT)
         self.dyna_Add("end.y", lx.symbol.sTYPE_FLOAT)
         self.dyna_Add("end.z", lx.symbol.sTYPE_FLOAT)
-        self.end = (0.0, 0.0, 0.0)
+        self.end = (0.0, DEFAULT_RADIUS, 0.0)
 
         self.dyna_Add("radius", lx.symbol.sTYPE_DISTANCE)
-        self.radius = 0.0
+        self.radius = DEFAULT_RADIUS
+
         self.dyna_Add("angle", lx.symbol.sTYPE_ANGLE)
-        self.angle = 0.0
+        self.angle = DEFAULT_ANGLE
 
         self.dyna_Add("segments", lx.symbol.sTYPE_INTEGER)
-        self.segments = 1
+        self.segments = DEFAULT_SEGMENTS
+
         self.dyna_Add("reverse", lx.symbol.sTYPE_BOOLEAN)
-        self.reverse = 0
+        self.reverse = DEFAULT_REVERSE
 
         selection_service = lx.service.Selection()
         self.scene_code = selection_service.LookupType(lx.symbol.sSELTYP_SCENE)
@@ -283,6 +285,26 @@ class ArcTool(lxifc.Tool, lxifc.ToolModel, lxu.attributes.DynamicAttributes):
     @radius.setter
     def radius(self, radius_: float):
         self.attr_SetFlt(9, radius_)
+        """ ::SetRotHandle() """
+        v = lxu.vector.sub(self.start, self.center)
+        l = lxu.vector.length(v)
+        if l > 0.0:
+            v = lxu.vector.scale(v, radius_ / l)
+            self.start = lxu.vector.add(self.center, v)
+        else:
+            v = lxu.vector.scale(self.start_vector, radius_)
+            self.start = lxu.vector.add(self.center, v)
+
+        v = lxu.vector.sub(self.end, self.center)
+        l = lxu.vector.length(v)
+        if l > 0.0:
+            v = lxu.vector.scale(v, radius_ / l)
+            self.end = lxu.vector.add(self.center, v)
+        else:
+            v = lxu.vector.scale(self.end_vector, radius_)
+            self.end = lxu.vector.add(self.center, v)
+            self.end = self.get_pos(1.0, 1.0)
+        """ """
 
     @property
     def angle(self) -> float:
@@ -504,7 +526,36 @@ class ArcTool(lxifc.Tool, lxifc.ToolModel, lxu.attributes.DynamicAttributes):
 
     # Here we will define the methods for lxifc.ToolModel
     def draw_handles(self, vts, stroke, flags):
-        pass
+        vector_stack = lx.object.VectorStack(vts)
+        tool_view_event = ToolViewEvent.from_address(vector_stack.Optional(self.offset_view))
+
+        if (tool_view_event.type != lx.symbol.i_VIEWTYPE_3D) and (tool_view_event.type != lx.symbol.i_VIEWTYPE_2D):
+            return
+
+        if not self.primary.test():
+            return
+
+        color = (0.8, 0.8, 0.8)
+        # TODO: Plane Matrix method,
+
+        handle = lx.object.HandleDraw(stroke)
+
+        # Draw the center handle,
+        if self.part == ARC_HANDLE_CENTER:
+            flags = lx.symbol.i_THANDf_SMALL | lx.symbol.i_THANDf_HOT
+        else:
+            flags = lx.symbol.i_THANDf_SMALL
+
+        handle.Handle(self.center, 0, ARC_HANDLE_CENTER, flags)
+
+        # Draw the start handle, and the text at start position,
+        if self.part == ARC_HANDLE_START:
+            flags = lx.symbol.i_THANDf_SMALL | lx.symbol.i_THANDf_HOT
+        else:
+            flags = lx.symbol.i_THANDf_SMALL
+
+        handle.RotateMouseHandle(self.center, self.start, 0, 2, ARC_HANDLE_START, flags)
+
 
     def tmod_Draw(self, vts, stroke, flags):
         self.draw_handles(vts, stroke, flags)
