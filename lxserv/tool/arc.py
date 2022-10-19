@@ -133,6 +133,45 @@ class ToolInputEvent(ctypes.Structure):
          type={self.type}, haul={self.haul})"
 
 
+class GUID(ctypes.Structure):
+    _fields_ = [
+        ("x4", ctypes.c_int),
+        ("x2", ctypes.c_short*2),
+        ("x1", ctypes.c_char*8),
+    ]
+
+
+class Unknown(ctypes.Structure):
+    _fields_ = [
+        ("QueryInterface", ctypes.CFUNCTYPE(ctypes.c_uint,
+                                            ctypes.c_void_p, ctypes.POINTER(GUID), ctypes.POINTER(ctypes.c_void_p))),
+        ("AddRef", ctypes.CFUNCTYPE(ctypes.c_uint,
+                                    ctypes.c_void_p)),
+        ("Release", ctypes.CFUNCTYPE(ctypes.c_uint,
+                                     ctypes.c_void_p)),
+    ]
+
+
+class EventTranslatePackage(ctypes.Structure):
+    _fields_ = [
+        ("iunk", Unknown),
+        ("ToModel", ctypes.CFUNCTYPE(ctypes.c_int,
+                                     ctypes.c_void_p, ctypes.c_void_p, ctypes.c_double*3, ctypes.c_double*3)),
+        ("ToModelLine", ctypes.CFUNCTYPE(None,
+                                         ctypes.c_void_p, ctypes.c_void_p, ctypes.c_double * 3, ctypes.c_double * 3, ctypes.c_double * 3)),
+        ("ToModelPlane", ctypes.CFUNCTYPE(None,
+                                          ctypes.c_void_p, ctypes.c_void_p, ctypes.c_double * 3, ctypes.c_double * 3, ctypes.c_double * 3)),
+        ("ModelDelta", ctypes.CFUNCTYPE(None,
+                                        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_double * 3, ctypes.c_double * 3)),
+        ("ModelLineDelta", ctypes.CFUNCTYPE(None,
+                                            ctypes.c_void_p, ctypes.c_void_p, ctypes.c_double * 3, ctypes.c_double * 3, ctypes.c_double * 3)),
+        ("ModelPlaneDelta", ctypes.CFUNCTYPE(None,
+                                             ctypes.c_void_p, ctypes.c_void_p, ctypes.c_double * 3, ctypes.c_double * 3, ctypes.c_double * 3, ctypes.c_double * 3)),
+        ("HitHandle", ctypes.CFUNCTYPE(None,
+                                       ctypes.c_void_p, ctypes.c_void_p, ctypes.c_double * 3)),
+    ]
+
+
 def matrix_multiply(m: matrix, v: vector) -> vector:
     """ recreating the matrix multiply from lxu math """
     r = [0.0, 0.0, 0.0]
@@ -229,6 +268,9 @@ class ArcTool(lxifc.Tool, lxifc.ToolModel, lxu.attributes.DynamicAttributes):
 
         self.primary = lx.object.Item()
         self.lock_angle = False
+
+        lx_vector = ctypes.c_double * 3  # ok this only makes the "type"
+        self.v = lx_vector()  # here we instansiate
 
     # Using python properties here to more easily access the attributes,
     # in the cpp version these are saved as members to the class like "m_name"
@@ -391,8 +433,7 @@ class ArcTool(lxifc.Tool, lxifc.ToolModel, lxu.attributes.DynamicAttributes):
 
         # TODO: Get the EventTranslatePacket from the vector stack
         address = vector_stack.Optional(self.offset_event)
-        event_translate_packet = lx.object.EventTranslatePacket()
-        # event_translate_packet.set(address)  # NOTE: not working,
+        event_translate_packet = EventTranslatePackage.from_address(address)
 
         # Test that the primary mesh is in the scene, (#56533)
         # guessing this is referring to a reported bug with the tool
@@ -409,6 +450,9 @@ class ArcTool(lxifc.Tool, lxifc.ToolModel, lxu.attributes.DynamicAttributes):
                 break
 
         if self.initial_drag:
+            print(f"vts: {vts.__peekobj__()}")
+            event_translate_packet.HitHandle(address, vts.__peekobj__(), self.v) # access violation :((
+            print(f"Hello {(v[0], v[1], v[2])}")
             adjust_tool.SetFlt(9, 1.0e-6)  # how is this different from just setting the attribute?
             return lx.result.TRUE
 
