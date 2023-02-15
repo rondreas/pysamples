@@ -58,6 +58,33 @@ class Manager(lxifc.Package, lxifc.ChannelModManager):
         add_channel.NewChannel("nParts", lx.symbol.sTYPE_INTEGER)
         add_channel.SetDefault(0.0, 0)
 
+        add_channel.NewChannel("surfaceArea", lx.symbol.sTYPE_FLOAT)
+        add_channel.SetDefault(0.0, 0)
+
+        default_vector = lx.object.storage("d", 3)
+        default_vector.set((0.0, 0.0, 0.0))
+
+        add_channel.NewChannel("boundsMin", lx.symbol.sTYPE_FLOAT)
+        add_channel.SetVector(lx.symbol.sCHANVEC_XYZ)
+        add_channel.SetDefaultVec(default_vector)
+
+        add_channel.NewChannel("boundsMax", lx.symbol.sTYPE_FLOAT)
+        add_channel.SetVector(lx.symbol.sCHANVEC_XYZ)
+        add_channel.SetDefaultVec(default_vector)
+
+        add_channel.NewChannel("size", lx.symbol.sTYPE_DISTANCE)
+        add_channel.SetVector(lx.symbol.sCHANVEC_XYZ)
+        add_channel.SetDefaultVec(default_vector)
+
+        add_channel.NewChannel("center", lx.symbol.sTYPE_DISTANCE)
+        add_channel.SetVector(lx.symbol.sCHANVEC_XYZ)
+        add_channel.SetDefaultVec(default_vector)
+
+        add_channel.NewChannel("boundingBox", lx.symbol.sTYPE_BOOLEAN)
+        add_channel.SetDefault(0.0, 0)
+        add_channel.NewChannel("dimensions", lx.symbol.sTYPE_BOOLEAN)
+        add_channel.SetDefault(0.0, 0)
+
     def pkg_TestInterface(self, guid):
         return guid == lx.symbol.u_PACKAGEINSTANCE
 
@@ -75,6 +102,23 @@ class Manager(lxifc.Package, lxifc.ChannelModManager):
         setup.AddChannel("nEdges", lx.symbol.fCHMOD_OUTPUT)
         setup.AddChannel("nPolygons", lx.symbol.fCHMOD_OUTPUT)
         setup.AddChannel("nParts", lx.symbol.fCHMOD_OUTPUT)
+        setup.AddChannel("surfaceArea", lx.symbol.fCHMOD_OUTPUT)
+
+        setup.AddChannel("boundsMin.X", lx.symbol.fCHMOD_OUTPUT)
+        setup.AddChannel("boundsMin.Y", lx.symbol.fCHMOD_OUTPUT)
+        setup.AddChannel("boundsMin.Z", lx.symbol.fCHMOD_OUTPUT)
+
+        setup.AddChannel("boundsMax.X", lx.symbol.fCHMOD_OUTPUT)
+        setup.AddChannel("boundsMax.Y", lx.symbol.fCHMOD_OUTPUT)
+        setup.AddChannel("boundsMax.Z", lx.symbol.fCHMOD_OUTPUT)
+
+        setup.AddChannel("size.X", lx.symbol.fCHMOD_OUTPUT)
+        setup.AddChannel("size.Y", lx.symbol.fCHMOD_OUTPUT)
+        setup.AddChannel("size.Z", lx.symbol.fCHMOD_OUTPUT)
+
+        setup.AddChannel("center.X", lx.symbol.fCHMOD_OUTPUT)
+        setup.AddChannel("center.Y", lx.symbol.fCHMOD_OUTPUT)
+        setup.AddChannel("center.Z", lx.symbol.fCHMOD_OUTPUT)
 
 
 class Modifier(lxifc.Modifier):
@@ -98,6 +142,23 @@ class Modifier(lxifc.Modifier):
         self.edges_index = eval.AddChannelName(item, "nEdges", lx.symbol.fECHAN_WRITE)
         self.polygons_index = eval.AddChannelName(item, "nPolygons", lx.symbol.fECHAN_WRITE)
         self.parts_index = eval.AddChannelName(item, "nParts", lx.symbol.fECHAN_WRITE)
+        self.surface_area_index = eval.AddChannelName(item, "surfaceArea", lx.symbol.fECHAN_WRITE)
+
+        self.bounds_min_x_index = eval.AddChannelName(item, "boundsMin.X", lx.symbol.fECHAN_WRITE)
+        self.bounds_min_y_index = eval.AddChannelName(item, "boundsMin.Y", lx.symbol.fECHAN_WRITE)
+        self.bounds_min_z_index = eval.AddChannelName(item, "boundsMin.Z", lx.symbol.fECHAN_WRITE)
+
+        self.bounds_max_x_index = eval.AddChannelName(item, "boundsMax.X", lx.symbol.fECHAN_WRITE)
+        self.bounds_max_y_index = eval.AddChannelName(item, "boundsMax.Y", lx.symbol.fECHAN_WRITE)
+        self.bounds_max_z_index = eval.AddChannelName(item, "boundsMax.Z", lx.symbol.fECHAN_WRITE)
+
+        self.size_x_index = eval.AddChannelName(item, "size.X", lx.symbol.fECHAN_WRITE)
+        self.size_y_index = eval.AddChannelName(item, "size.Y", lx.symbol.fECHAN_WRITE)
+        self.size_z_index = eval.AddChannelName(item, "size.Z", lx.symbol.fECHAN_WRITE)
+
+        self.center_x_index = eval.AddChannelName(item, "center.X", lx.symbol.fECHAN_WRITE)
+        self.center_y_index = eval.AddChannelName(item, "center.Y", lx.symbol.fECHAN_WRITE)
+        self.center_z_index = eval.AddChannelName(item, "center.Z", lx.symbol.fECHAN_WRITE)
 
         self.graph = lx.object.ItemGraph(scene.GraphLookup(GRAPH))
 
@@ -135,9 +196,11 @@ class Modifier(lxifc.Modifier):
         poly_count = self.mesh.PolygonCount()
 
         part_count = 0
+        surface_area = 0.0
         poly = self.mesh.PolygonAccessor()
         for i in range(self.mesh.PolygonCount()):
             poly.SelectByIndex(i)
+            surface_area += poly.Area()
             part_count = max(part_count, poly.Part())
         part_count += 1
 
@@ -147,14 +210,32 @@ class Modifier(lxifc.Modifier):
             # TODO: from item, get locator, which can get us a matrix to apply to all point positions,
             lx.out("World Space!")
 
-        vert = self.mesh.PointAccessor()
-        for i in range(vert_count):
-            vert.SelectByIndex(i)
+        # local space bounds,
+        min_bounds, max_bounds = self.mesh.BoundingBox(lx.symbol.iMARK_ANY)
+        size = tuple(b - a for a, b in zip(min_bounds, max_bounds))
+        center = tuple((a + b) * 0.5 for a, b in zip(min_bounds, max_bounds))
 
         self.attr.SetInt(self.points_index, vert_count)
         self.attr.SetInt(self.edges_index, edge_count)
         self.attr.SetInt(self.polygons_index, poly_count)
         self.attr.SetInt(self.parts_index, part_count)
+        self.attr.SetFlt(self.surface_area_index, surface_area)
+
+        self.attr.SetFlt(self.bounds_min_x_index, min_bounds[0])
+        self.attr.SetFlt(self.bounds_min_y_index, min_bounds[1])
+        self.attr.SetFlt(self.bounds_min_z_index, min_bounds[2])
+
+        self.attr.SetFlt(self.bounds_max_x_index, max_bounds[0])
+        self.attr.SetFlt(self.bounds_max_y_index, max_bounds[1])
+        self.attr.SetFlt(self.bounds_max_z_index, max_bounds[2])
+
+        self.attr.SetFlt(self.size_x_index, size[0])
+        self.attr.SetFlt(self.size_y_index, size[1])
+        self.attr.SetFlt(self.size_z_index, size[2])
+
+        self.attr.SetFlt(self.center_x_index, center[0])
+        self.attr.SetFlt(self.center_y_index, center[1])
+        self.attr.SetFlt(self.center_z_index, center[2])
 
 
 class EvalModifier(lxifc.EvalModifier):
