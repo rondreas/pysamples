@@ -8,29 +8,8 @@ import lx
 import lxifc
 
 
-SERVER = "py.cmMeshInfo"
-GRAPH = SERVER + ".graph"
-USER = GRAPH + "UserName"
-
-
-def get_mesh_change(flag: int):
-    """ Check the bitmask for mesh edit changes, and return the list of reported changes. """
-    masks = (
-        (lx.symbol.f_MESHEDIT_POSITION, "Position"),
-        (lx.symbol.f_MESHEDIT_POINTS, "Points"),
-        (lx.symbol.f_MESHEDIT_POLYGONS, "Polygons"),
-        (lx.symbol.f_MESHEDIT_POL_TAGS, "Polygon Tags"),
-        (lx.symbol.f_MESHEDIT_POL_TYPE, "Polygon Type"),
-        (lx.symbol.f_MESHEDIT_MAP_CONTINUITY, "Map Continuity"),
-        (lx.symbol.f_MESHEDIT_MAP_UV, "Map UV"),
-        (lx.symbol.f_MESHEDIT_MAP_MORPH, "Map Morph"),
-        (lx.symbol.f_MESHEDIT_MAP_OTHER, "Map Other"),
-        (lx.symbol.f_MESHEDIT_UPDATE, "Update"),
-        (lx.symbol.f_MESHEDIT_DELTA, "Delta"),
-    )
-    for mask, name in masks:
-        if mask & flag:
-            lx.out(name)
+SERVER = "py.cmMeshInfo"  # the name of our item,
+GRAPH = SERVER + ".graph"  # the name of our schematic graph
 
 
 class Instance(lxifc.PackageInstance):
@@ -58,17 +37,17 @@ class Manager(lxifc.Package, lxifc.ChannelModManager):
         add_channel.NewChannel("nParts", lx.symbol.sTYPE_INTEGER)
         add_channel.SetDefault(0.0, 0)
 
-        add_channel.NewChannel("surfaceArea", lx.symbol.sTYPE_FLOAT)
+        add_channel.NewChannel("surfaceArea", lx.symbol.sTYPE_DISTANCE)
         add_channel.SetDefault(0.0, 0)
 
         default_vector = lx.object.storage("d", 3)
         default_vector.set((0.0, 0.0, 0.0))
 
-        add_channel.NewChannel("boundsMin", lx.symbol.sTYPE_FLOAT)
+        add_channel.NewChannel("boundsMin", lx.symbol.sTYPE_DISTANCE)
         add_channel.SetVector(lx.symbol.sCHANVEC_XYZ)
         add_channel.SetDefaultVec(default_vector)
 
-        add_channel.NewChannel("boundsMax", lx.symbol.sTYPE_FLOAT)
+        add_channel.NewChannel("boundsMax", lx.symbol.sTYPE_DISTANCE)
         add_channel.SetVector(lx.symbol.sCHANVEC_XYZ)
         add_channel.SetDefaultVec(default_vector)
 
@@ -182,7 +161,6 @@ class Modifier(lxifc.Modifier):
             item_ = self.graph.RevByIndex(item, 0)
             if self.ident == item_.Ident():
                 changes = self.mesh_tracker.Changes()
-                get_mesh_change(changes)  # debug print what changed with geo
                 return changes & lx.symbol.f_MESHEDIT_GEOMETRY
 
         return False
@@ -208,7 +186,7 @@ class Modifier(lxifc.Modifier):
         world_space = self.attr.GetInt(self.world_space_index)
         if world_space:
             # TODO: from item, get locator, which can get us a matrix to apply to all point positions,
-            lx.out("World Space!")
+            pass
 
         # local space bounds,
         min_bounds, max_bounds = self.mesh.BoundingBox(lx.symbol.iMARK_ANY)
@@ -239,6 +217,13 @@ class Modifier(lxifc.Modifier):
 
 
 class EvalModifier(lxifc.EvalModifier):
+    """ Modifiers have two forms. The modifier class is a plug-in server of type ILxEvalModifier. This provides methods
+    for creating modifier instances which operate on specific channels. The instance is an object that caches specific
+    references to input and output channels and can perform computations over them. For example there is only one "IK"
+    ILxEvalModifier server, but it will create instances to evaluate IK for all locators with parents.
+
+    Each instance is identified by a key channel. The class interface provides methods for enumerating through key
+    channels and creating and testing instances."""
     def __init__(self):
         scene_service = lx.service.Scene()
         self.item_type = scene_service.ItemTypeLookup(SERVER)
@@ -248,11 +233,14 @@ class EvalModifier(lxifc.EvalModifier):
         self.count = 0
 
     def eval_Reset(self, scene):
+        """ Set the modifier class to the given scene, and reset the count of key channels for the Next() method."""
         self.scene.set(scene)
         self.index = 0
         self.count = self.scene.ItemCount(self.item_type)
 
     def eval_Next(self):
+        """ Returns the item and index for the next key channel for this modifier in the current scene. If the last one
+        has already been read, this method returns null."""
         if self.index >= self.count:
             return 0, 0
         item = self.scene.ItemByIndex(self.item_type, self.index)
@@ -260,14 +248,20 @@ class EvalModifier(lxifc.EvalModifier):
         return item, 0
 
     def eval_Alloc(self, item, index, evaluation):
+        """ Create a new instance for the given key channel.  The eval object allows the instance to create references
+        to the channels it wants to be able to read and write, and to cache the attributes interface needed to read
+        their values during evaluation."""
         return Modifier(lx.object.Item(item), lx.object.Evaluation(evaluation))
 
 
-class Schematic(lxifc.SchematicConnection, lxifc.SchemaDest):
+class Schematic(lxifc.SchematicConnection):
+    """ A SchematicConnection server manages a particular connection point for inter-item relations. Normally this is a
+    graph link but can be any type of relation that the client wants to implement. The name of the connection point
+    (the text shown on the node) is the name of the server."""
     def __init__(self):
         scene_service = lx.service.Scene()
-        self.item_type = scene_service.ItemTypeLookup(SERVER)
-        self.mesh_type = scene_service.ItemTypeLookup("mesh")
+        self.item_type = scene_service.ItemTypeLookup(SERVER)  # item type we want to add the schematic graph to
+        self.mesh_type = scene_service.ItemTypeLookup("mesh")  # item type we want to accept as input
 
     def schm_ItemFlags(self, item) -> int:
         """ A SchematicConnection server manages a particular connection point for inter-item relations. Normally this
@@ -282,11 +276,15 @@ class Schematic(lxifc.SchematicConnection, lxifc.SchemaDest):
         return 0
 
     def schm_AllowConnect(self, from_obj, to_obj) -> bool:
+        """ Given a pair of items, this function returns LXe_TRUE if the connection is allowed. The 'to' item is the one
+        with the connection point, and is assumed to have valid item flags, above."""
         item = lx.object.Item(from_obj)
         return item.TestType(self.mesh_type)
 
     def schm_GraphName(self):
-        """ Without this, we seem to never be able to connect the mesh to the input plug. """
+        """ This returns the name of a single graph. For connection points that can be described by one graph the graph
+        name is sufficient for schematic to do all the legwork. Connecting adds a link from the source to the target in
+        the graph, and drawing just enumerates the graph. """
         return GRAPH
 
 
@@ -311,13 +309,8 @@ class MeshEditListener(lxifc.SceneItemListener):
             scene.EvalModInvalidate(SERVER)
 
 
-MeshEditListener()
+MeshEditListener()  # instantiate our listener to mesh edits invalidates the eval modifier
 
-lx.bless(Schematic, GRAPH, {lx.symbol.sSRV_USERNAME: USER})
-
+lx.bless(Schematic, GRAPH, {lx.symbol.sSRV_USERNAME: "Mesh"})
 lx.bless(EvalModifier, SERVER, {lx.symbol.sMOD_TYPELIST: SERVER, lx.symbol.sMOD_GRAPHLIST: GRAPH})
-
-lx.bless(Manager, SERVER, {
-    lx.symbol.sPKG_SUPERTYPE: lx.symbol.sITYPE_CHANMODIFY,
-    lx.symbol.sPKG_GRAPHS: GRAPH
-})
+lx.bless(Manager, SERVER, {lx.symbol.sPKG_SUPERTYPE: lx.symbol.sITYPE_CHANMODIFY, lx.symbol.sPKG_GRAPHS: GRAPH})
