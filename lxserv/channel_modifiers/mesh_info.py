@@ -4,12 +4,39 @@
 
 """
 
+from math import sqrt
+
 import lx
 import lxifc
-
+import lxu
 
 SERVER = "py.cmMeshInfo"  # the name of our item,
 GRAPH = SERVER + ".graph"  # the name of our schematic graph
+
+
+def square_distance(a, b) -> float:
+    """ Get the squared distance between to points """
+    return sum((x-y)**2 for x, y in zip(a, b))
+
+
+def distance(a, b) -> float:
+    """ Get the distance between two points """
+    return sqrt(square_distance(a, b))
+
+
+def triangle_area(a, b, c) -> float:
+    """ Using Herons formula - get the area for a triangle
+    for a,b,c uv positions. """
+    # Get the length for each edge
+    ab = distance(a, b)
+    bc = distance(b, c)
+    ca = distance(c, a)
+
+    # Get the half of triangle perimeter
+    s = (ab + bc + ca) / 2.0
+
+    # Return the surface area
+    return sqrt(s * (s-ab) * (s-bc) * (s-ca))
 
 
 class Instance(lxifc.PackageInstance):
@@ -77,6 +104,7 @@ class Manager(lxifc.Package, lxifc.ChannelModManager):
         methods on that object to add the channels it wants for reading and writing. The names are all for channels on
         items of this type, and may be set as inputs or outputs."""
         setup = lx.object.ChannelModSetup(cmod)
+
         setup.AddChannel("nPoints", lx.symbol.fCHMOD_OUTPUT)
         setup.AddChannel("nEdges", lx.symbol.fCHMOD_OUTPUT)
         setup.AddChannel("nPolygons", lx.symbol.fCHMOD_OUTPUT)
@@ -102,16 +130,21 @@ class Manager(lxifc.Package, lxifc.ChannelModManager):
 
 class Modifier(lxifc.Modifier):
     def __init__(self, item: lx.object.Item, eval: lx.object.Evaluation):
-        self.attr = lx.object.Attributes(eval)
-
-        self.item = lx.object.Item()
-        self.mesh = lx.object.Mesh()
-        self.mesh_tracker = lx.object.MeshTracker()
-        self.ident = None
-
+        # Get the scene this modifier is added to, and test that both scene and this modifier is valid.
         scene = item.Context()
         if not item.test() and not scene.test():
             return
+
+        self.attr = lx.object.Attributes(eval)
+        self.item = lx.object.Item()
+        # self.mesh = lx.object.Mesh()
+        # self.mesh_tracker = lx.object.MeshTracker()
+        self.ident = None
+
+        self.graph = lx.object.ItemGraph(scene.GraphLookup(GRAPH))
+        if self.graph.RevCount(item):
+            self.item = self.graph.RevByIndex(item, 0)
+            self.ident = self.item.Ident()
 
         # AddChannelName requires that the channel already exists, or will raise LookupError
         self.deformed_index = eval.AddChannelName(item, "deformed", lx.symbol.fECHAN_READ)
@@ -139,57 +172,77 @@ class Modifier(lxifc.Modifier):
         self.center_y_index = eval.AddChannelName(item, "center.Y", lx.symbol.fECHAN_WRITE)
         self.center_z_index = eval.AddChannelName(item, "center.Z", lx.symbol.fECHAN_WRITE)
 
-        self.graph = lx.object.ItemGraph(scene.GraphLookup(GRAPH))
-
-        if self.graph.RevCount(item):
-            item_ = self.graph.RevByIndex(item, 0)
-            self.item = item_
-            self.ident = item_.Ident()
-            channel_read = lx.object.ChannelRead(scene.Channels(lx.symbol.s_ACTIONLAYER_EDIT, 0.0))
-            self.mesh = lx.object.Mesh(channel_read.ValueObj(item_, item_.ChannelLookup(lx.symbol.sICHAN_MESH_MESH)))
-            self.mesh_tracker = lx.object.MeshTracker(self.mesh.TrackChanges())
-            self.mesh_tracker.Start()
+        if self.item.test():
+            self.mesh_index = eval.AddChannelName(self.item, lx.symbol.sICHAN_MESH_MESH, lx.symbol.fECHAN_READ)
+            self.xfrm_index = eval.AddChannelName(self.item, lx.symbol.sICHAN_XFRMCORE_WORLDMATRIX, lx.symbol.fECHAN_READ)
+        else:
+            self.mesh_index, self.xfrm_index = 0, 0
 
     def mod_Test(self, item: lx.object.Unknown, index: int) -> bool:
         """ Test an instance to see if its still valid for the given key. """
-        item = lx.object.Item(item)
-        scene = item.Context()
-        if not item.test() and not scene.test():
-            return False
-
-        if self.graph.RevCount(item) > 0:
-            item_ = self.graph.RevByIndex(item, 0)
-            if self.ident == item_.Ident():
-                changes = self.mesh_tracker.Changes()
-                return changes & lx.symbol.f_MESHEDIT_GEOMETRY
-
         return False
 
     def mod_Evaluate(self):
-        if not self.mesh.test():
+        if not (self.mesh_index and self.xfrm_index):
             return
 
-        vert_count = self.mesh.PointCount()
-        edge_count = self.mesh.EdgeCount()
-        poly_count = self.mesh.PolygonCount()
+        mesh_stack = self.attr.Value(self.mesh_index, False)
+        mesh_filter = lx.object.MeshFilter(mesh_stack)
+        if not mesh_filter.test():
+            return
 
-        part_count = 0
-        surface_area = 0.0
-        poly = self.mesh.PolygonAccessor()
-        for i in range(self.mesh.PolygonCount()):
-            poly.SelectByIndex(i)
-            surface_area += poly.Area()
-            part_count = max(part_count, poly.Part())
-        part_count += 1
+        mesh = mesh_filter.Generate()
+        if not mesh.test():
+            return
+
+        matrix_object = self.attr.Value(self.xfrm_index, False)
+        matrix = lx.object.Matrix(matrix_object)
 
         # if we want to calculate the bounds in world space, we will need to get the transform from the item,
         world_space = self.attr.GetInt(self.world_space_index)
-        if world_space:
-            # TODO: from item, get locator, which can get us a matrix to apply to all point positions,
-            pass
 
-        # local space bounds,
-        min_bounds, max_bounds = self.mesh.BoundingBox(lx.symbol.iMARK_ANY)
+        vert_count = mesh.PointCount()
+        edge_count = mesh.EdgeCount()
+        poly_count = mesh.PolygonCount()
+
+        min_bounds = tuple((float("inf"),) * 3)
+        max_bounds = tuple((-float("inf"),) * 3)
+
+        part_count = 0
+        surface_area = 0.0
+        poly = mesh.PolygonAccessor()
+        vert = mesh.PointAccessor()
+        for i in range(mesh.PolygonCount()):
+            poly.SelectByIndex(i)
+            part_count = max(part_count, poly.Part())
+            if world_space:
+                for j in range(poly.GenerateTriangles()):
+                    a, b, c = poly.TriangleByIndex(j)
+
+                    vert.Select(a)
+                    a_pos = matrix.MultiplyVector(vert.Pos())
+                    min_bounds = tuple(min(x, y) for x, y in zip(min_bounds, a_pos))
+                    max_bounds = tuple(max(x, y) for x, y in zip(max_bounds, a_pos))
+
+                    vert.Select(b)
+                    b_pos = matrix.MultiplyVector(vert.Pos())
+                    min_bounds = tuple(min(x, y) for x, y in zip(min_bounds, b_pos))
+                    max_bounds = tuple(max(x, y) for x, y in zip(max_bounds, b_pos))
+
+                    vert.Select(c)
+                    c_pos = matrix.MultiplyVector(vert.Pos())
+                    min_bounds = tuple(min(x, y) for x, y in zip(min_bounds, c_pos))
+                    max_bounds = tuple(max(x, y) for x, y in zip(max_bounds, c_pos))
+
+                    surface_area += triangle_area(a_pos, b_pos, c_pos)
+            else:
+                surface_area += poly.Area()
+
+        part_count += 1  # parts start counting from zero
+
+        if not world_space:
+            min_bounds, max_bounds = mesh.BoundingBox(lx.symbol.iMARK_ANY)
+
         size = tuple(b - a for a, b in zip(min_bounds, max_bounds))
         center = tuple((a + b) * 0.5 for a, b in zip(min_bounds, max_bounds))
 
