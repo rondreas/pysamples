@@ -1,6 +1,5 @@
+debugger/
 .idea/
-
 *.swp
-
 *.pyc
 tags
