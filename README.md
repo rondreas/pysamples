@@ -71,8 +71,8 @@ Rewrite all samples from Modo's LXSDK in Python with detailed documentation abou
     - [ ] drawover_wireframe
     - [ ] filepath_asset
     - [ ] view3d_overlay
-- [ ] preset
-    - [ ] colorSynthPath
+- [x] preset
+    - [x] colorSynthPath
 - [ ] scene_render
     - [ ] trace
 - [x] schematic_connection
