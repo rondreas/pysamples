@@ -53,6 +53,9 @@ class Command(lxu.command.BasicCommand):
 
         raise LookupError("Failed to find schematic group and node")
 
+    def cmd_Flags(self):
+        return lx.symbol.fCMD_SELECT | lx.symbol.fCMD_UNDO
+
     def basic_Execute(self, message: lxu.object.Message, flags: int):  # pylint: disable=invalid-name, unused-argument
         """ Overridden method,
 
